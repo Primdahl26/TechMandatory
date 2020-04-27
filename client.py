@@ -101,8 +101,8 @@ def keep_alive():
                 print('Sending heartbeat to server\nSending: ' + str(heartbeatMessage)+'\n')
                 sock.sendto(heartbeatMessage, server_address)
 
-    finally:
-        print('Something went wrong')
+    except Exception as e:
+        print('Reading error: '.format(str(e)))
 
 
 def get_self_written_message():
