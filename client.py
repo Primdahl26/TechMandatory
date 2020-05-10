@@ -28,19 +28,24 @@ def main():
         while True:
             # If a normal message is received
             if get_data()[:3] == b'res' and hasBeenRun is False:
-                incrementingNumber += 2
-                okMessage = 'msg-' + str(incrementingNumber) + '=Ok, good to know'
-                print('Enter message: ')
+                if conf.getboolean("settings", "AutomateMessages") is False:
+                    incrementingNumber += 2
+                    print('Enter message: ')
+                    write()
+                    finalMessage = 'msg-' + str(incrementingNumber) + '=' + get_self_written_message()
 
-                write()
+                    print('Sending: ' + finalMessage)
+                    sock.sendto(finalMessage.encode(), server_address)
 
-                finalMessage = 'msg-' + str(incrementingNumber) + '=' + get_self_written_message()
+                    hasBeenRun = True
+                else:
+                    incrementingNumber += 2
+                    okMessage = 'msg-' + str(incrementingNumber) + '=Ok, good to know'
 
-                print('Sending: ' + finalMessage)
-                sock.sendto(finalMessage.encode(), server_address)
+                    print('Sending: ' + okMessage)
+                    sock.sendto(okMessage.encode(), server_address)
 
-                hasBeenRun = True
-
+                    hasBeenRun = True
             # If accept message is received
             if get_data()[:12] == b'com-0 accept' and hasBeenRun is False:
                 acceptMessage = 'com-' + str(incrementingNumber) + ' accept'
@@ -105,6 +110,17 @@ def keep_alive():
         print('Reading error: '.format(str(e)))
 
 
+def hack():
+    try:
+        while conf.getboolean("hack", "HackActive"):
+            sock.sendto(b'What you gonna do about this message?', server_address)
+            print('Sending hack message: What you gonna do about this message?')
+            time.sleep(1/conf.getint("hack", "HackAmount"))
+
+    except Exception as e:
+        print('Reading error: '.format(str(e)))
+
+
 def get_self_written_message():
     return selfWrittenMessage
 
@@ -118,3 +134,4 @@ if __name__ == '__main__':
     threading.Thread(target=main).start()
     threading.Thread(target=check_heartbeat).start()
     threading.Thread(target=keep_alive).start()
+    threading.Thread(target=hack).start()
