@@ -22,6 +22,8 @@ hasBeenRun = False
 too_many_packets = False
 packets = []
 
+# TODO: The packets seem to be counting weird - need to fix
+
 
 def read():
     global data, hasBeenRun, address, packets
