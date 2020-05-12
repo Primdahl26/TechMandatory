@@ -1,28 +1,72 @@
 import os
+from threading import *
 import socket
 import threading
 from configparser import ConfigParser
 import time
 import sys
 
-conf = ConfigParser()
-conf.read("opt.conf", encoding='utf-8')
+# For making printing with threads
+# not screw up the text layout
+screen_lock = Semaphore(value=1)
 
 # Create a UDP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_address = ('localhost', 10000)
 
+# To read from the opt.conf file
+conf = ConfigParser()
+conf.read("opt.conf", encoding='utf-8')
+
+# Bind the socket to the port
 hostname = socket.gethostname()
 ip_address = socket.gethostbyname(hostname)
+
+# The message that the user writes
 self_written_message = ''
 
+# Data
 data = b''
+
+# A value to see if a piece of code has been executed
+# This is present since the program is threaded, and the main method
+# needs to only execute the if statement once - and then again when the read
+# message gets new data - then the value is set to False again
 has_been_run = False
 
 # TODO: Make incrementing_number read the message number from the data then + 1
 
 
+# While loop that reads messages
+def read():
+    global data, server, has_been_run
+    # Send ip address to get accepted
+    ip_message = b'com-0 '+ip_address.encode()
+    sock.sendto('com-0 '.encode() + ip_address.encode(), server_address)
+
+    screen_lock.acquire()
+    print('\nTrying to access server\nSending IP...\nSending: {!r}'.format(ip_message))
+    screen_lock.release()
+
+    while True:
+        # Start up the client socket, and wait for a message
+        data, server = sock.recvfrom(4096)
+
+        screen_lock.acquire()
+        print('\nReceived {} bytes from {}'.format(len(data), server))
+        print('Data: ' + str(data))
+        screen_lock.release()
+
+        # Setting has_been_run to false, since a new message was just received
+        has_been_run = False
+
+        # To make the threads not screw up
+        time.sleep(0.1)
+
+
+# Method that handles the messages that read() has read
 def main():
+    # A number that we add up to see the message number
     incrementing_number = 0
     global has_been_run
 
@@ -30,95 +74,136 @@ def main():
         while True:
             # If a normal message is received
             if get_data()[:3] == b'res' and has_been_run is False:
+
+                # If the opt.conf file AutomateMessages is false, then the user
+                # needs to write the message
                 if conf.getboolean("settings", "AutomateMessages") is False:
                     incrementing_number += 2
+
+                    screen_lock.acquire()
                     print('Enter message: ')
+                    screen_lock.release()
+
                     write()
+
                     final_message = 'msg-' + str(incrementing_number) + '=' + get_self_written_message()
 
-                    print('Sending: ' + final_message)
+                    # Send message back
                     sock.sendto(final_message.encode(), server_address)
 
+                    screen_lock.acquire()
+                    print('Sending: ' + final_message)
+                    screen_lock.release()
+
+                    # The code has been executed, so we make has been run true,
+                    # so that we dont execute the same code multiple times
                     has_been_run = True
+
+                # Else the client will write a ok_message itself
                 else:
                     incrementing_number += 2
                     ok_message = 'msg-' + str(incrementing_number) + '=Ok, good to know'
 
-                    print('Sending: ' + ok_message)
+                    # Send message back
                     sock.sendto(ok_message.encode(), server_address)
 
+                    screen_lock.acquire()
+                    print('Sending: ' + ok_message)
+                    screen_lock.release()
+
+                    # The code has been executed, so we make has been run true,
+                    # so that we dont execute the same code multiple times
                     has_been_run = True
+
             # If accept message is received
             if get_data()[:12] == b'com-0 accept' and has_been_run is False:
                 acceptMessage = 'com-' + str(incrementing_number) + ' accept'
 
-                print('Sending: ' + acceptMessage)
+                # Send message back
                 sock.sendto(acceptMessage.encode(), server_address)
+
+                screen_lock.acquire()
+                print('Sending: ' + acceptMessage)
+                screen_lock.release()
 
                 first_message = 'msg-' + str(incrementing_number) + '=Hello, i am new user'
 
-                print('Sending: ' + first_message)
+                # Send message back
                 sock.sendto(first_message.encode(), server_address)
 
+                screen_lock.acquire()
+                print('Sending: ' + first_message)
+                screen_lock.release()
+
+                # The code has been executed, so we make has been run true,
+                # so that we dont execute the same code multiple times
                 has_been_run = True
 
+    # If the loop is broken, close the socket
     finally:
-        print('\nReached finally block\nClosing socket...')
+        screen_lock.acquire()
+        print('Reached finally block-\nClosing socket...')
+        screen_lock.release()
+
         sock.close()
 
 
-def read():
-    global data, server, has_been_run
-    # Send ip address to get accepted
-    ipMessage = b'com-0 '+ip_address.encode()
-    print('Sending IP...\nSending: {!r}'.format(ip_address))
-    sock.sendto('com-0 '.encode() + ip_address.encode(), server_address)
-    while True:
-        print()
-        # Start up the client socket, and wait for a message
-        data, server = sock.recvfrom(4096)
-        print('Received {} bytes from {}'.format(len(data), server))
-        print('Data: ' + str(data))
-
-        has_been_run = False
-
-
+# Method so the user can write input
 def write():
     global self_written_message
     self_written_message = input()
 
 
+# Method that checks if the message is con-res 0xFE
+# If this is the case, then shut down the client
 def check_heartbeat():
     while True:
         if get_data()[:12] == b'con-res 0xFE':
             close_message = 'con-res 0xFF'
 
+            # Send to server that the client has received the order to close down
+            # Answer is: con-res 0xFF
             sock.sendto(close_message.encode(), server_address)
-            print('Idle for more than 4 seconds\nClosing down connection with following message: ' + close_message)
+
+            screen_lock.acquire()
+            print('Idle for more than 4 seconds-\nClosing down connection with following message: ' + close_message)
+            screen_lock.release()
 
             sys.stdout.flush()
             os._exit(0)
 
 
+# A thread keeps running this, so that the server does not
+# kick the client due to inactivity
 def keep_alive():
     heartbeat_message = b'con-h 0x00'
     try:
+        # If the KeepALive setting in opt.conf is True
         if conf.getboolean("settings", "KeepALive"):
             while True:
+                # Wait the seconds and repeat sending the message
+                # so that the server does not kick us out
                 time.sleep(3)
-                print('Sending heartbeat to server\nSending: ' + str(heartbeat_message)+'\n')
+                # print('Sending heartbeat to server\nSending: ' + str(heartbeat_message)+'\n')
                 sock.sendto(heartbeat_message, server_address)
 
     except Exception as e:
+        screen_lock.acquire()
         print('Reading error: '.format(str(e)))
+        screen_lock.release()
 
 
+# Method that sends a message to the Server that is meant to disrupt it
 def hack():
     try:
+        # While the HackActive setting in opt.conf is True
         while conf.getboolean("hack", "HackActive"):
-            sock.sendto(b'What you gonna do about this message?', server_address)
-            print('\nSending hack message: What you gonna do about this message?\n')
             time.sleep(1)
+            sock.sendto(b'What you gonna do about this message?', server_address)
+
+            screen_lock.acquire()
+            print('Sending hack message: What you gonna do about this message?')
+            screen_lock.release()
 
     except Exception as e:
         print('Reading error: '.format(str(e)))
@@ -132,6 +217,7 @@ def get_data():
     return data
 
 
+# Startup the threads
 if __name__ == '__main__':
     threading.Thread(target=read).start()
     threading.Thread(target=main).start()
