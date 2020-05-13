@@ -4,6 +4,7 @@ from threading import *
 import time
 from configparser import ConfigParser
 from datetime import datetime
+import re
 
 # For making printing with threads
 # not screw up the text layout
@@ -15,7 +16,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # Bind the socket to the port
 # Startup the Servers socket
 server_address = ('localhost', 10000)
-print('starting up on {} port {}'.format(*server_address))
+print('\nStarting up on {} port {}'.format(*server_address))
 sock.bind(server_address)
 
 # To read from the opt.conf file
@@ -43,11 +44,13 @@ ip = 'default_ip'
 # Variable too see if it is the first time the client runs on the server
 first_run = True
 
+handshake_completed = False
 
-# Method to log messages to the ServerLog.log file
+
+# Method to log messages to the server_log.log file
 def log_server(conn, message):
     # "a" for append
-    log = open("ServerLog.log", "a")
+    log = open("server_log.log", "a")
     log.write(f"[{conn}] {datetime.now()} {message}\n")
     log.close()
 
@@ -60,7 +63,7 @@ def read():
     empty_packets_timer.start()
 
     screen_lock.acquire()
-    print('\nServer startup complete')
+    print('\n<<Server startup complete>>')
     screen_lock.release()
 
     while True:
@@ -95,12 +98,6 @@ def read():
 
         # TODO: Make incrementing_number read the message number from the data then + 1
 
-        try:
-            current_incremented_number = get_data().decode()[get_data().decode().index('-'):]
-            print(current_incremented_number)
-        except IndexError:
-            pass
-
         # If LogActive is true, then log the message
         if conf.getboolean('log', 'LogActive') is True:
             log_server(address, 'Incomming: ' + str(data))
@@ -111,16 +108,15 @@ def read():
 
 # Method that handles the messages that read() has read
 def main():
-    # A number that we add up to see the message number
-    incrementing_number = 1
+    global has_been_run, too_many_packets, ip, connected_ip, handshake_completed, first_run
 
-    global has_been_run, too_many_packets, ip, connected_ip
+    # Default the server message number to 0
+    server_message_number = 0
 
     while True:
         # If too many packets have been received the last 1 second
         # then we pause handling the messages for a second
         if get_too_many_packets() is True:
-
             screen_lock.acquire()
             print('Too many packets received last second-\n'
                   'Ignoring incoming messages for 1 second')
@@ -130,7 +126,6 @@ def main():
 
         # If the IP is received, and the IP is valid
         if is_good_ipv4(get_ip()) and get_has_been_run() is False:
-            incrementing_number = 1
             accept_message = 'com-0 accept ' + socket.gethostbyname(socket.gethostname())
 
             # Send message back
@@ -154,54 +149,87 @@ def main():
             # Change the ip to a not valid ip
             ip = 'default_ip'
 
-            # Start the time_thread again, so kill_client will be called
+            # Start the time_thread again, so timeout_client will be called
             # if more than 4 seconds pass without any message
             time_thread.start()
 
         # If an accept message is received
         if get_data()[:12] == b'com-0 accept' and get_has_been_run() is False:
+            completed_handshake = '<<Handshake completed with ' + connected_ip + '>>'
 
             screen_lock.acquire()
-            print('\nHandshake completed')
+            print('\n' + completed_handshake)
             screen_lock.release()
 
             # If LogActive is true, then log the message
             if conf.getboolean('log', 'LogActive') is True:
-                log_server(address, 'Handshake completed')
+                log_server(address, completed_handshake)
 
             # The code has been executed, so we make has been run true,
             # so that we dont execute the same code multiple times
             has_been_run = True
 
-            # Start the time_thread again, so kill_client will be called
+            # Handshake has been completed
+            handshake_completed = True
+
+            # Start the time_thread again, so timeout_client will be called
             # if more than 4 seconds pass without any message
             time_thread.start()
 
-        # If a message is received
-        if get_data()[:3] == b'msg' and get_has_been_run() is False:
-            automated_message = 'res-' + str(incrementing_number) + '=I am server'
-            incrementing_number += 2
+            # We default the server_message_number here too so that
+            # if we stop the client we dont need to restart the server
+            server_message_number = 0
 
-            sock.sendto(automated_message.encode(), address)
+        # If a message is received and handshake has been completed
+        if get_data()[:3] == b'msg' and get_has_been_run() is False and handshake_completed is True:
 
-            screen_lock.acquire()
-            print('Sending: ' + automated_message)
-            screen_lock.release()
+            # If the message number from the client is the same as the server number + 1
+            # then it follows the protocol OR if it is the first message and server message number is 0
+            if int(re.search(r"\d+", get_data().decode()).group()) == server_message_number + 1 \
+                    or server_message_number == 0:
 
-            # If LogActive is true, then log the message
-            if conf.getboolean('log', 'LogActive') is True:
-                log_server(address, 'Outgoing: ' + str(automated_message))
+                try:
+                    # Set the client message number to the first int found in the message
+                    client_message_number = int(re.search(r"\d+", get_data().decode()).group())
 
-            # The code has been executed, so we make has been run true,
-            # so that we dont execute the same code multiple times
-            has_been_run = True
+                    # Set the server message number to +1 of the clients
+                    server_message_number = client_message_number + 1
 
-            # Start the time_thread again, so kill_client will be called
-            # if more than 4 seconds pass without any message
-            time_thread.start()
+                    screen_lock.acquire()
+                    print('Client Message number: ' + str(client_message_number))
+                    screen_lock.release()
 
-            # If the message is QUIT then kill the client
-            if get_data().decode().split('=')[1] == 'QUIT':
+                except IndexError as e:
+                    print('IndexError:" ' + str(e))
+                    break
+
+                # Send message
+                automated_message = 'res-' + str(server_message_number) + '=I am server'
+                sock.sendto(automated_message.encode(), address)
+
+                screen_lock.acquire()
+                print('Sending: ' + automated_message)
+                screen_lock.release()
+
+                # If LogActive is true, then log the message
+                if conf.getboolean('log', 'LogActive') is True:
+                    log_server(address, 'Outgoing: ' + str(automated_message))
+
+                # The code has been executed, so we make has been run true,
+                # so that we dont execute the same code multiple times
+                has_been_run = True
+
+                # Start the time_thread again, so timeout_client will be called
+                # if more than 4 seconds pass without any message
+                time_thread.start()
+
+            else:
+                screen_lock.acquire()
+                print('\nProtocol broken by message: ' + get_data().decode() +
+                      '\nOrdering client to disconnect')
+                screen_lock.release()
+
+                # Method to kill the client
                 kill_client()
 
         # Message that the client successfully disconnected
@@ -214,13 +242,17 @@ def main():
             # so that we dont execute the same code multiple times
             has_been_run = True
 
+            first_run = True
+
+            handshake_completed = False
+
         # If the data is the first default message
         if get_data() == b'default_message':
             # The code has been executed, so we make has been run true,
             # so that we dont execute the same code multiple times
             has_been_run = True
 
-            # Start the time_thread again, so kill_client will be called
+            # Start the time_thread again, so timeout_client will be called
             # if more than 4 seconds pass without any message
             time_thread.stop()
 
@@ -234,14 +266,27 @@ def main():
             # so that we dont execute the same code multiple times
             has_been_run = True
 
-            # Start the time_thread again, so kill_client will be called
+            # Start the time_thread again, so timeout_client will be called
             # if more than 4 seconds pass without any message
             time_thread.stop()
 
+        # If the message does not use the protocol at all
+        # Yes this is not pretty i know XD
+        if get_data()[:15] != b'default_message' and get_data()[:4] != b'con-' \
+                and get_data()[:5] != b'com-0' and get_data()[:4] != b'msg-':
 
-# Method to kill the client
-def kill_client():
-    global first_run
+            screen_lock.acquire()
+            print('\nProtocol broken by message: ' + get_data().decode() +
+                  '\nOrdering client to disconnect')
+            screen_lock.release()
+
+            # Method to kill the client
+            kill_client()
+
+
+# Method to timeout the client
+def timeout_client():
+    global first_run, handshake_completed, data
 
     timeout_message = 'con-res 0xFE'
 
@@ -261,8 +306,41 @@ def kill_client():
     time_thread.stop()
 
     # since client disconnected,
-    # it will be first
+    # it will be first, handshake will need to be done again
     first_run = True
+    handshake_completed = False
+
+    # Setting data to default again
+    data = b'default_message'
+
+
+# Method to kill the client
+def kill_client():
+    global first_run, handshake_completed, data
+
+    timeout_message = 'con-res 0xFU'
+
+    sock.sendto(timeout_message.encode(), address)
+
+    screen_lock.acquire()
+    print('Sending:' + timeout_message)
+    screen_lock.release()
+
+    # If LogActive is true, then log the message
+    if conf.getboolean('log', 'LogActive') is True:
+        log_server(address, 'Outgoing: ' + str(timeout_message))
+
+    # Stop the TimeThread, and make it first_run true,
+    # since a clients run would be the first again
+    time_thread.stop()
+
+    # since client disconnected,
+    # it will be first, handshake will need to be done again
+    first_run = True
+    handshake_completed = False
+
+    # Setting data to default again
+    data = b'default_message'
 
 
 # Clears the packets
@@ -341,7 +419,7 @@ class RepeatedTimer(object):
 
 # Startup the threads
 if __name__ == '__main__':
-    time_thread = RepeatedTimer(4, kill_client)
+    time_thread = RepeatedTimer(4, timeout_client)
     empty_packets_timer = RepeatedTimer(1, empty_packets)
     threading.Thread(target=read).start()
     threading.Thread(target=main).start()
