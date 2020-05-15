@@ -96,8 +96,6 @@ def read():
         print('Data: ' + str(data))
         screen_lock.release()
 
-        # TODO: Make incrementing_number read the message number from the data then + 1
-
         # If LogActive is true, then log the message
         if conf.getboolean('log', 'LogActive') is True:
             log_server(address, 'Incomming: ' + str(data))
@@ -183,9 +181,9 @@ def main():
         # If a message is received and handshake has been completed
         if get_data()[:3] == b'msg' and get_has_been_run() is False and handshake_completed is True:
 
-            # If the message number from the client is the same as the server number + 1
+            # If the message number from the client - 1 is the same as the server number
             # then it follows the protocol OR if it is the first message and server message number is 0
-            if int(re.search(r"\d+", get_data().decode()).group()) == server_message_number + 1 \
+            if int(re.search(r"\d+", get_data().decode()).group()) - 1 == server_message_number \
                     or server_message_number == 0:
 
                 try:
@@ -226,7 +224,7 @@ def main():
             else:
                 screen_lock.acquire()
                 print('\nProtocol broken by message: ' + get_data().decode() +
-                      '\nOrdering client to disconnect')
+                      '\nCounter most likely abused\nOrdering client to disconnect')
                 screen_lock.release()
 
                 # Method to kill the client

@@ -36,9 +36,6 @@ data = b''
 has_been_run = False
 
 
-# TODO: Make incrementing_number read the message number from the data then + 1
-
-
 # While loop that reads messages
 def read():
     global data, server, has_been_run
