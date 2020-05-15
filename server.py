@@ -125,7 +125,7 @@ def main():
             time.sleep(1)
 
         # If the IP is received, and the IP is valid
-        if is_good_ipv4(get_ip()) and get_has_been_run() is False:
+        if get_data()[:5] == b'com-0' and is_good_ipv4(get_ip()) and get_has_been_run() is False:
             accept_message = 'com-0 accept ' + socket.gethostbyname(socket.gethostname())
 
             # Send message back
